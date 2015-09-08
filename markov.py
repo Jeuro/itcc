@@ -27,7 +27,11 @@ def window_generator(seq, n=2):
 
 content_text = sys.stdin.read()
 tokenizer = RegexpTokenizer('\[[^\]]*\( |[+/\-@&*]|\w+|\$[\d\.]+|\S+')
-text = tokenizer.tokenize(content_text)
+# For words
+#text = tokenizer.tokenize(content_text)
+# For characters
+text = content_text
+
 tokens = window_generator(text, order + 1)
 
 matrix = {}
@@ -56,12 +60,16 @@ def markov_generator(matrix, order):
         item = item[1:] + (word,)
 
 
-for word in markov_generator(matrix, order):
-    time.sleep(0.5)
-    if word.startswith((".", ",", ";", "!", "?", ":")):
-        sys.stdout.write(word)
-    else:
-        sys.stdout.write(" " + word)
-    sys.stdout.flush()
+#for word in markov_generator(matrix, order):
+#    time.sleep(0.5)
+#    if word.startswith((".", ",", ";", "!", "?", ":")):
+#        sys.stdout.write(word)
+#    else:
+#        sys.stdout.write(" " + word)
+#    sys.stdout.flush()
 
+for char in markov_generator(matrix, order):
+    time.sleep(0.1)
+    sys.stdout.write(char)
+    sys.stdout.flush()
 
