@@ -12,7 +12,7 @@ with open(filename) as f:
 
         if phrase.startswith(pattern):
             last_word = phrase.split()[-1]
-            counter[last_word] += 1
+            counter[last_word] += int(row[2])
 
 
 for word, count in counter.most_common():
