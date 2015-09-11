@@ -7,14 +7,16 @@ filename = sys.argv[1]
 pattern = sys.argv[2]
 
 
-def get_noun(filename, pattern):
+def get_noun(filename, word):
     counter = Counter()
+    regex = "".join((r"as ", word, r" as [\S]* [\S]*$"))
+    pattern = re.compile(regex)
 
     with open(filename) as f:
         for row in csv.reader(f, delimiter="\t"):
             phrase = row[0]
 
-            if phrase.startswith(pattern):
+            if pattern.match(phrase):
                 last_word = phrase.split()[-1]
                 counter[last_word] += int(row[2])
 
@@ -41,4 +43,5 @@ def get_adjective(filename, word):
         print(word, count)
 
 
-get_adjective(filename, pattern)
+#get_adjective(filename, pattern)
+get_noun(filename, pattern)
