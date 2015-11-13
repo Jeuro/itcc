@@ -68,8 +68,10 @@ def markov_generator(matrix, order):
 #        sys.stdout.write(" " + word)
 #    sys.stdout.flush()
 
-for char in markov_generator(matrix, order):
-    time.sleep(0.1)
-    sys.stdout.write(char)
-    sys.stdout.flush()
+#for char in markov_generator(matrix, order):
+#    time.sleep(0.1)
+#    sys.stdout.write(char)
+#    sys.stdout.flush()
+
+
 

@@ -1,0 +1,8 @@
+\score {
+ <<
+ { \key c \major
+ e16 c32 e,16 a16 e2 f16 aes8 b,16.
+ }>> 
+ \midi { }
+ \layout { }
+}

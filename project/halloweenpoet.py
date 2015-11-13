@@ -1,5 +1,4 @@
 from __future__ import division
-import getopt
 import itertools
 import nltk
 import os.path
@@ -15,6 +14,7 @@ from nltk.tokenize import RegexpTokenizer
 
 VOWELS = "AEIOU"
 CONSONANTS = "BCDFGHJKLMNPQRSTVWXYZ"
+BORDER = "-----------------------------------"
 phonedict = cmudict.dict()
 cmuwords = cmudict.words()
 
@@ -52,11 +52,8 @@ class TextHandler:
             result = result[1:] + (elem,)
             yield result
 
-    def create_reverse_matrix(self, text):
-        text = reversed(text)
+    def add_ngrams_to_matrix(self, text, matrix):
         tokens = self.window_generator(text, self.order + 1)
-        matrix = {}
-
         for sequence in tokens:
             current = sequence[:-1]
             succ = sequence[-1]
@@ -67,7 +64,64 @@ class TextHandler:
             counter = matrix[current]
             counter[succ] += 1
 
+    def create_reverse_matrix(self, text):
+        text = reversed(text)
+        matrix = {}
+        tokens = self.window_generator(text, self.order + 1)
+        for sequence in tokens:
+            current = sequence[:-1]
+            succ = sequence[-1]
+
+            if current not in matrix:
+                matrix[current] = Counter()
+
+            counter = matrix[current]
+
+            if succ in self.scary_words:
+                counter[succ] += 2
+            else:
+                counter[succ] += 1
         return matrix
+
+    def increase_matrix_probs(self, text, matrix):                
+        """Teach a new text to given matrix."""
+        lines = text.splitlines()
+        for line in lines:
+            line = reversed(line)
+            tokens = self.window_generator(line, self.order + 1)
+            for sequence in tokens:
+                current = sequence[:-1]
+                succ = sequence[-1]
+
+                if current not in matrix:
+                    matrix[current] = Counter()
+
+                counter = matrix[current]
+                counter[succ] += 1
+
+    def decrease_matrix_probs(self, text, matrix):                
+        """Decrease state transition probabilities found in a text in given matrix."""
+        lines = text.splitlines()
+        for line in lines:
+            line = reversed(line)
+            tokens = self.window_generator(line, self.order + 1)
+            for sequence in tokens:
+                current = sequence[:-1]
+                succ = sequence[-1]
+
+                if current not in matrix:
+                    matrix[current] = Counter()
+
+                counter = matrix[current]
+                # do not entirely remove an existing transition 
+                if counter[succ] > 1:
+                    counter[succ] -= 1
+
+    def update_matrix(self, good_texts, poor_texts, matrix):
+        for gt in good_texts:
+            self.increase_matrix_probs(gt, matrix)
+        for pt in poor_texts:
+            self.decrease_matrix_probs(pt, matrix)
 
     def read_scary_words(self, filename):
         with open(filename) as f:
@@ -100,14 +154,23 @@ class TextHandler:
 
 
 class Poet:
-    def __init__(self, reverse_matrix, rhyme_dict, scary_words, min_lines, max_lines, min_syllables, max_syllables):
-        self.reverse_matrix = reverse_matrix
-        self.rhyme_dict = rhyme_dict
-        self.scary_words = scary_words
-        self.min_lines = min_lines
-        self.max_lines = max_lines
+    def __init__(self, th, line_lengths, min_syllables, max_syllables):
+        self.th = th
+        self.reverse_matrix = th.get_matrix()
+        self.rhyme_dict = th.rhyme_dict
+        self.scary_words = th.scary_words
+        self.scary_pos_dict = self.create_pos_dict(self.scary_words)
+        self.line_lengths = line_lengths
         self.min_syllables = min_syllables
         self.max_syllables = max_syllables
+        self.switch_prob = 0.5
+
+    def create_pos_dict(self, words):
+        pos_dict = defaultdict(list)
+        tagged_words = nltk.pos_tag(words)
+        for (word, tag) in tagged_words:
+            pos_dict[tag].append(word)
+        return pos_dict
 
     def matching_phonemes(self, words, mode):
         phonemes = []
@@ -128,34 +191,10 @@ class Poet:
 
             phonemes.append(phoneme)
 
-
         return all(p == phonemes[0] for p in phonemes)
-
 
     def rhyme(self, words):
         return matching_phonemes(words, "r")
-
-
-    def alliterate(self, words):
-        return matching_phonemes(words, "a")
-
-    def generate_alliteration(self, keys):    
-        item = random.choice(keys)
-        prev = item
-        for word in item:
-            yield word
-
-        for _ in xrange(7):
-            words = list(self.reverse_matrix[item].elements())
-            allit_words = filter(lambda x: alliterate(prev + (x, )), words)
-            if not allit_words:
-               return
-
-            word = random.choice(allit_words)
-            yield word
-            item = item[1:] + (word,)
-            prev = item
-
 
     def syllable_count(self, word):
         # Take the first pronunciation option
@@ -173,13 +212,11 @@ class Poet:
         
         return "".join(phonemes)
 
-
     def get_first_phoneme(self,word):
         return phonedict[word.lower()][0][0]
 
     def get_rhyming_word(self, rhyme_dict, word):
         return random.choice(rhyme_dict[word])
-
 
     def create_rest_of_line(self, item):
         nsyl = 0
@@ -228,9 +265,8 @@ class Poet:
 
         yield " ".join(reversed(line))
 
-
     def create_rhyming_line(self, rhyme):
-        rhyming_keys = [tup for tup in self.reverse_matrix.keys() if tup[0] in self.rhyme_dict[self.get_rhyme_phoneme(rhyme)]]
+        rhyming_keys = [tup for tup in self.reverse_matrix.keys() if tup[0] != rhyme and tup[0] in self.rhyme_dict[self.get_rhyme_phoneme(rhyme)]]
         if not rhyming_keys:
             return
 
@@ -240,7 +276,6 @@ class Poet:
             return
 
         yield " ".join(reversed(line))
-
 
     def fix_capitalization(self, line):
         words = line.split()
@@ -255,61 +290,94 @@ class Poet:
         new_line = " ".join(words)
         return new_line[0].upper() + new_line[1:]
 
+    def fix_poem_format(self, lines):
+        for i, line in enumerate(lines):
+            line = self.fix_capitalization(line)
+            if i % 2 != 0:
+                line += "\n"
+            lines[i] = line
+
+    def make_scarier(self, lines):
+        """Replace random words with scary words."""
+        pos_to_change =("NN", "NNS", "NNP", "NNPS", "JJ", "VB", "VBG", "VBD")
+        
+        for i, line in enumerate(lines):            
+            words = line.split()
+            tagged_words = nltk.pos_tag(words)
+
+            for j, (_, tag) in enumerate(tagged_words):
+                if (tag in pos_to_change) and self.scary_pos_dict[tag] and (j < len(tagged_words) - 1) and (random.random() < self.switch_prob):                             
+                    new_word = random.choice(self.scary_pos_dict[tag])
+                    words[j] = new_word
+            
+            lines[i] = " ".join(words)
 
     def create_poem(self):   
-        line_count = random.randint(self.min_lines, self.max_lines)
+        line_count = random.choice(self.line_lengths)
 
-        while True:   
-            print "start"     
-            first_line = "".join(self.create_random_line())
-            if not first_line:
-                continue
+        while True: 
+            lines = []
+            for i in xrange(int(line_count/2)):    
+                first_line = "".join(self.create_random_line())
+                if not first_line:
+                    break
 
-            first_line = self.make_scarier(first_line)
-            rhyme = first_line.split()[-1]
-            if len(self.rhyme_dict[self.get_rhyme_phoneme(rhyme)]) < line_count - 1:
-                continue
-
-            lines = [first_line]
-
-            for _ in xrange(line_count - 1):
+                lines.append(first_line)
+                rhyme = first_line.split()[-1]
                 line = "".join(self.create_rhyming_line(rhyme))
                 lines.append(line)
-
-            if not all(lines):
+                
+            if len(lines) < line_count or not all(lines):
                 continue
 
-            return "\n".join(self.fix_capitalization(l) for l in lines) + "\n"
+            self.make_scarier(lines)
+            self.fix_poem_format(lines)
+            return "\n".join(lines)
 
-
-    def make_scarier(self, line):
-        """Replace a random word with a scary word"""
-        words = line.split()
-        tagged_words = nltk.pos_tag(words)
-        pos_to_change = random.choice(("NN", "NNS", "NNP", "JJ", ))
-        new_words = [word for word, tag in nltk.pos_tag(self.scary_words) if tag == pos_to_change]
-        indices = []
-        for i, (_, tag) in enumerate(tagged_words):
-            if tag == pos_to_change:
-                indices.append(i)
-        
-        if not indices or not new_words:
-            # use original line
-            return line
-        
-        new_word = random.choice(new_words)
-        index = random.choice(indices)
-        words[index] = new_word
-        return " ".join(words)
-
+    def update_matrix(self, good_poems, bad_poems):
+        self.th.update_matrix(good_poems, bad_poems, self.reverse_matrix)
 
 
 def main():
-        order = int(sys.argv[1])
-        files = sys.argv[2:]
-        th = TextHandler(order, files, "rhymedict.p", "scary_words.txt")
-        poet = Poet(th.get_matrix(), th.rhyme_dict, th.scary_words, 3, 5, 8, 16)
-        print poet.create_poem()
+    order = 1
+    files = sys.argv[1:]
+    th = TextHandler(order, files, "rhymedict.p", "scary_words.txt")
+    line_lengths = (4, )
+    poet = Poet(th, line_lengths, 8, 16)
+    round_counter = 1
+
+    while True:
+        print "Round", round_counter
+        poem1 = poet.create_poem()
+        poem2 = poet.create_poem()
+
+        print BORDER + "\n"
+        print poem1
+        print BORDER + "\n"
+        print poem2
+        print BORDER
+
+        selection = raw_input(
+            "Which poem is a better Halloween poem?\n" + 
+            "1 = first poem\n" +
+            "2 = second poem\n" +
+            "3 = both are good\n" +
+            "4 = both are bad" +
+            "\nEnter = skip evaluation:\n")
+
+        if selection == 1:
+            poet.update_matrix((poem1), (poem2))
+        if selection == 2:
+            poet.update_matrix((poem2), (poem1))
+        if selection == 3:            
+            poet.update_matrix((poem1, poem2), ())
+        if selection == 4:
+            poet.update_matrix((), (poem1, poem2))
+
+        exit = raw_input("\nPress Enter to create new poems... (enter q to stop)\n")
+        if exit == "q":
+            return
+        round_counter +=1
 
 
 if __name__ == "__main__":
